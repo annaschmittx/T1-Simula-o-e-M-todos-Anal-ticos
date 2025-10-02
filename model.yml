@@ -1,61 +1,51 @@
 !PARAMETERS
-# Parâmetros de execução (opcional, dependendo do simulador do professor)
-# starttime: 2.0
-# maxrandoms: 100000
-
-# O campo 'arrivals' é usado para definir a primeira chegada no sistema
 arrivals: 
-   Q1: 2.0 # A primeira chegada ocorre no tempo 2.0 na Fila Q1
+   Fila1: 2.0 # Primeira chegada no tempo 2.0 na Fila 1
 
 queues: 
-   Q1: 
+   Fila1: 
       servers: 1
-      capacity: 99999 # K=infinito (usando um número grande como convenção)
-      minArrival: 2.0 # Tempo entre chegadas externas
+      capacity: 99999 # Representa K = infinito
+      minArrival: 2.0
       maxArrival: 4.0
       minService: 1.0
       maxService: 2.0
-   Q2: 
+   Fila2: 
       servers: 2
       capacity: 5
-      # Q2 não tem chegadas externas, apenas internas, então min/maxArrival são 0
       minArrival: 0.0 
       maxArrival: 0.0
       minService: 4.0
       maxService: 6.0
-   Q3: 
+   Fila3: 
       servers: 2
       capacity: 10
-      # Q3 não tem chegadas externas
       minArrival: 0.0
       maxArrival: 0.0
       minService: 5.0
       maxService: 15.0
 
 network: 
-# Roteamento da Fila 1 (Q1)
--  source: Q1
-   destination: Q2
+-  source: Fila1
+   destination: Fila2
    probability: 0.8
--  source: Q1
-   destination: Q3
+-  source: Fila1
+   destination: Fila3
    probability: 0.2
 
-# Roteamento da Fila 2 (Q2)
--  source: Q2
-   destination: Q1
+-  source: Fila2
+   destination: Fila1
    probability: 0.3
--  source: Q2
-   destination: Q3
+-  source: Fila2
+   destination: Fila3
    probability: 0.5
--  source: Q2
+-  source: Fila2
    destination: EXTERIOR
    probability: 0.2
    
-# Roteamento da Fila 3 (Q3)
--  source: Q3
-   destination: Q1
+-  source: Fila3
+   destination: Fila1
    probability: 0.7
--  source: Q3
+-  source: Fila3
    destination: EXTERIOR
    probability: 0.3
