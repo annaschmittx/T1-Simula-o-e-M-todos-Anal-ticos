@@ -1,13 +1,16 @@
 #include <bits/stdc++.h>
+#include "yaml-cpp/yaml.h" 
+
 using namespace std;
 
-enum TipoEvento { CHEGADA_EXTERNA, FIM_S1, FIM_S2, FIM_S3 };
+enum TipoEvento { CHEGADA_EXTERNA, FIM_SERVICO };
 
 struct Evento {
     double tempo;
     TipoEvento tipo;
+    string nome_fila;
     int id;
-    Evento(double t, TipoEvento ty, int i) : tempo(t), tipo(ty), id(i) {}
+    Evento(double t, TipoEvento ty, const string& nf, int i) : tempo(t), tipo(ty), nome_fila(nf), id(i) {}
 };
 
 struct ComparadorEvento {
@@ -17,172 +20,203 @@ struct ComparadorEvento {
     }
 };
 
-const double chegada_baixa = 2.0, chegada_alta = 4.0; 
-const double srv1_baixo = 1.0, srv1_alto = 2.0;       
-const double srv2_baixo = 4.0, srv2_alto = 6.0;      
-const double srv3_baixo = 5.0, srv3_alto = 15.0;     
+struct Transicao {
+    string destino;
+    double probabilidade;
+};
 
-const int c1 = 1, K1 = INT_MAX; // G/G/1 (capacidade infinita)
-const int c2 = 2, K2 = 5;       // G/G/2/5
-const int c3 = 2, K3 = 10;      // G/G/2/10
-
-const double primeira_chegada = 2.0; 
-const long long MAX_RANDOMS = 100000;
-
-mt19937_64 gerador(42);
-uniform_real_distribution<double> U(0.0, 1.0);
-
-long long randoms_used = 0;
-
-inline double uniforme(double a, double b) {
-    randoms_used++;
-    return a + (b - a) * U(gerador);
-}
-
-//estrutura das filas
 struct Fila {
+    string nome;
     int servidores_ocupados = 0;
     int total = 0;
     int capacidade;
     int servidores;
+    double min_srv, max_srv;
+    double min_arr, max_arr;
+    
     vector<double> tempo_estado; 
     int perdas = 0;
     double ultimo_tempo = 0.0;
 };
 
-Fila fila1{0, 0, K1, c1, vector<double>(50, 0.0), 0, 0.0};
-Fila fila2{0, 0, K2, c2, vector<double>(K2+1, 0.0), 0, 0.0};
-Fila fila3{0, 0, K3, c3, vector<double>(K3+1, 0.0), 0, 0.0};
+const long long MAX_RANDOMS = 100000;
+string NOME_ARQUIVO_CONFIG = "model.yml"; 
+
+map<string, Fila> redeDeFilas;
+map<string, vector<Transicao>> regrasDeRoteamento;
+double primeira_chegada = 0.0;
+string FILA_CHEGADA_EXTERNA = "";
+
+mt19937_64 gerador(42);
+uniform_real_distribution<double> U(0.0, 1.0);
+long long randoms_used = 0;
+
+inline double uniforme(double a, double b) {
+    if (randoms_used >= MAX_RANDOMS) return 0.0;
+    randoms_used++;
+    return a + (b - a) * U(gerador);
+}
 
 priority_queue<Evento, vector<Evento>, ComparadorEvento> agenda;
 double relogio_sim = 0.0;
 
-void atualizar_tempos(Fila &f, double agora) {
-    if (f.total < (int)f.tempo_estado.size()) {
-        f.tempo_estado[f.total] += (agora - f.ultimo_tempo);
+void atualizar_tempos(double agora) {
+    for (auto& pair : redeDeFilas) {
+        Fila& f = pair.second;
+        if (f.total < (int)f.tempo_estado.size()) {
+            f.tempo_estado[f.total] += (agora - f.ultimo_tempo);
+        }
+        f.ultimo_tempo = agora;
     }
-    f.ultimo_tempo = agora;
 }
 
-void agendar(double t, TipoEvento tp) {
+void agendar(double t, TipoEvento tp, const string& nome_fila) {
     static int next_id = 0;
-    agenda.emplace(t, tp, next_id++);
+    agenda.emplace(t, tp, nome_fila, next_id++);
 }
 
-void chegada_externa() {
-    // Cliente chega na fila 1
-    if (fila1.total < fila1.capacidade) {
-        fila1.total++;
-        if (fila1.servidores_ocupados < fila1.servidores) {
-            fila1.servidores_ocupados++;
-            double s = uniforme(srv1_baixo, srv1_alto);
-            agendar(relogio_sim + s, FIM_S1);
-        }
-    }
+void processar_chegada_na_fila(const string& nome_fila, bool is_external) {
+    Fila& f = redeDeFilas[nome_fila];
 
-    double ia = uniforme(chegada_baixa, chegada_alta);
-    agendar(relogio_sim + ia, CHEGADA_EXTERNA);
-}
-
-void saida_fila(Fila &f, TipoEvento origem) {
-    f.total--;
-    if (f.total >= f.servidores_ocupados) {
-        double s;
-        if (origem == FIM_S1) s = uniforme(srv1_baixo, srv1_alto);
-        else if (origem == FIM_S2) s = uniforme(srv2_baixo, srv2_alto);
-        else s = uniforme(srv3_baixo, srv3_alto);
-        agendar(relogio_sim + s, origem);
-    } else {
-        f.servidores_ocupados--;
-    }
-}
-
-void roteamento_fila1() {
-    double u = uniforme(0.0, 1.0);
-    if (u < 0.8) {
-        // vai para fila 2
-        if (fila2.total < fila2.capacidade) {
-            fila2.total++;
-            if (fila2.servidores_ocupados < fila2.servidores) {
-                fila2.servidores_ocupados++;
-                double s = uniforme(srv2_baixo, srv2_alto);
-                agendar(relogio_sim + s, FIM_S2);
-            }
-        } else fila2.perdas++;
-    } else {
-        // vai para fila 3
-        if (fila3.total < fila3.capacidade) {
-            fila3.total++;
-            if (fila3.servidores_ocupados < fila3.servidores) {
-                fila3.servidores_ocupados++;
-                double s = uniforme(srv3_baixo, srv3_alto);
-                agendar(relogio_sim + s, FIM_S3);
-            }
-        } else fila3.perdas++;
-    }
-}
-
-void roteamento_fila2() {
-    double u = uniforme(0.0, 1.0);
-    if (u < 0.3) {
-        // volta para fila 1
-        if (fila1.total < fila1.capacidade) {
-            fila1.total++;
-            if (fila1.servidores_ocupados < fila1.servidores) {
-                fila1.servidores_ocupados++;
-                double s = uniforme(srv1_baixo, srv1_alto);
-                agendar(relogio_sim + s, FIM_S1);
-            }
-        }
-    } else if (u < 0.8) {
-        // vai para fila 3
-        if (fila3.total < fila3.capacidade) {
-            fila3.total++;
-            if (fila3.servidores_ocupados < fila3.servidores) {
-                fila3.servidores_ocupados++;
-                double s = uniforme(srv3_baixo, srv3_alto);
-                agendar(relogio_sim + s, FIM_S3);
-            }
-        } else fila3.perdas++;
-    } else {
-    }
-}
-
-void roteamento_fila3() {
-    double u = uniforme(0.0, 1.0);
-    if (u < 0.7) {
-        // volta para fila 1
-        if (fila1.total < fila1.capacidade) {
-            fila1.total++;
-            if (fila1.servidores_ocupados < fila1.servidores) {
-                fila1.servidores_ocupados++;
-                double s = uniforme(srv1_baixo, srv1_alto);
-                agendar(relogio_sim + s, FIM_S1);
-            }
+    if (f.total < f.capacidade) {
+        f.total++;
+        
+        if (f.servidores_ocupados < f.servidores) {
+            f.servidores_ocupados++;
+            double s = uniforme(f.min_srv, f.max_srv);
+            agendar(relogio_sim + s, FIM_SERVICO, nome_fila);
         }
     } else {
+        f.perdas++;
+    }
+
+    if (is_external) {
+        double ia = uniforme(f.min_arr, f.max_arr);
+        agendar(relogio_sim + ia, CHEGADA_EXTERNA, nome_fila);
+    }
+}
+
+void processar_saida_e_roteamento(const string& nome_fila_origem) {
+    Fila& fOrigem = redeDeFilas[nome_fila_origem];
+
+    fOrigem.total--;
     
+    if (fOrigem.total >= fOrigem.servidores_ocupados) {
+        double s = uniforme(fOrigem.min_srv, fOrigem.max_srv);
+        agendar(relogio_sim + s, FIM_SERVICO, nome_fila_origem);
+    } else {
+        fOrigem.servidores_ocupados--;
+    }
+
+    if (regrasDeRoteamento.count(nome_fila_origem)) {
+        double u = uniforme(0.0, 1.0);
+        double acumulador_prob = 0.0;
+        
+        for (const auto& transicao : regrasDeRoteamento[nome_fila_origem]) {
+            acumulador_prob += transicao.probabilidade;
+
+            if (u < acumulador_prob) {
+                string destino = transicao.destino;
+                
+                if (destino == "EXTERIOR") {
+                    break; 
+                } else if (redeDeFilas.count(destino)) {
+                    processar_chegada_na_fila(destino, false); 
+                    break;
+                }
+            }
+        }
     }
 }
+
+bool carregar_modelo_dinamico() {
+    try {
+        YAML::Node config = YAML::LoadFile(NOME_ARQUIVO_CONFIG);
+
+        // 1. Carregar Filas (queues)
+        const YAML::Node& queues = config["queues"];
+        for (YAML::const_iterator it = queues.begin(); it != queues.end(); ++it) {
+            string nomeFila = it->first.as<string>();
+            const YAML::Node& dadosFila = it->second;
+
+            Fila f;
+            f.nome = nomeFila;
+            f.servidores = dadosFila["servers"].as<int>();
+            
+            f.capacidade = dadosFila["capacity"].as<int>();
+            if (f.capacidade == 99999) {
+                 f.capacidade = INT_MAX;
+            }
+
+            f.min_srv = dadosFila["minService"].as<double>();
+            f.max_srv = dadosFila["maxService"].as<double>();
+            
+            if (dadosFila["minArrival"]) {
+                f.min_arr = dadosFila["minArrival"].as<double>();
+                f.max_arr = dadosFila["maxArrival"].as<double>();
+            }
+            
+            int k_size = (f.capacidade == INT_MAX ? 50 : f.capacidade + 1);
+            f.tempo_estado.resize(k_size, 0.0);
+            
+            redeDeFilas[nomeFila] = f;
+        }
+        
+        // 2. Carregar Roteamento (network)
+        const YAML::Node& network = config["network"];
+        for (const auto& transicao : network) {
+            string source = transicao["source"].as<string>();
+            string destination = transicao["destination"].as<string>();
+            double probability = transicao["probability"].as<double>();
+            
+            regrasDeRoteamento[source].push_back({destination, probability});
+        }
+        
+        // 3. Carregar Chegada Inicial (arrivals)
+        const YAML::Node& arrivals = config["arrivals"];
+        if (arrivals) {
+            for (YAML::const_iterator it = arrivals.begin(); it != arrivals.end(); ++it) {
+                FILA_CHEGADA_EXTERNA = it->first.as<string>();
+                primeira_chegada = it->second.as<double>();
+                break; 
+            }
+        } else {
+            cerr << "ERRO: O nó 'arrivals' não foi encontrado no arquivo YML." << endl;
+            return false;
+        }
+
+    } catch (const YAML::BadFile& e) {
+        cerr << "ERRO: O arquivo de configuracao '" << NOME_ARQUIVO_CONFIG << "' nao foi encontrado. " << e.what() << endl;
+        return false;
+    } catch (const YAML::Exception& e) {
+        cerr << "ERRO de parsing no arquivo YML: " << e.what() << endl;
+        return false;
+    }
+    return true;
+}
+
 int main() {
-    // primeira chegada fixa
-    agendar(primeira_chegada, CHEGADA_EXTERNA);
+    if (!carregar_modelo_dinamico()) {
+        return 1;
+    }
+
+    agendar(primeira_chegada, CHEGADA_EXTERNA, FILA_CHEGADA_EXTERNA);
 
     while (!agenda.empty() && randoms_used < MAX_RANDOMS) {
         Evento ev = agenda.top(); agenda.pop();
         relogio_sim = ev.tempo;
 
-        atualizar_tempos(fila1, relogio_sim);
-        atualizar_tempos(fila2, relogio_sim);
-        atualizar_tempos(fila3, relogio_sim);
+        atualizar_tempos(relogio_sim); 
 
         if (randoms_used >= MAX_RANDOMS) break;
 
         switch (ev.tipo) {
-            case CHEGADA_EXTERNA: chegada_externa(); break;
-            case FIM_S1: saida_fila(fila1, FIM_S1); roteamento_fila1(); break;
-            case FIM_S2: saida_fila(fila2, FIM_S2); roteamento_fila2(); break;
-            case FIM_S3: saida_fila(fila3, FIM_S3); roteamento_fila3(); break;
+            case CHEGADA_EXTERNA: 
+                processar_chegada_na_fila(ev.nome_fila, true); 
+                break;
+            case FIM_SERVICO: 
+                processar_saida_e_roteamento(ev.nome_fila); 
+                break;
         }
     }
 
@@ -190,19 +224,20 @@ int main() {
     cout << "Tempo total de simulacao: " << relogio_sim << " minutos\n";
     cout << "Numeros aleatorios usados: " << randoms_used << "\n\n";
 
-    auto report = [&](Fila &f, string nome) {
-        cout << "Fila " << nome << ":\n";
+    for (auto& pair : redeDeFilas) {
+        Fila& f = pair.second;
+        string capacidade_str = (f.capacidade == INT_MAX ? "inf" : to_string(f.capacidade));
+        
+        cout << "Fila " << f.nome << " (K=" << capacidade_str << ", c=" << f.servidores << "):\n";
+        
         double soma = accumulate(f.tempo_estado.begin(), f.tempo_estado.end(), 0.0);
+        
         for (int i = 0; i < (int)f.tempo_estado.size(); i++) {
             if (f.tempo_estado[i] > 0)
                 cout << "  Estado " << i << ": "
                      << f.tempo_estado[i] << " min, "
-                     << (f.tempo_estado[i] / soma) << "\n";
+                     << (f.tempo_estado[i] / relogio_sim) << "\n";
         }
         cout << "  Perdas: " << f.perdas << "\n\n";
-    };
-
-    report(fila1, "1");
-    report(fila2, "2");
-    report(fila3, "3");
+    }
 }
