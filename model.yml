@@ -35,17 +35,20 @@ network:
 
 -  source: Fila2
    destination: Fila1
-   probability: 0.3
+   probability: 0.2
 -  source: Fila2
    destination: Fila3
-   probability: 0.5
+   probability: 0.3
 -  source: Fila2
    destination: EXTERIOR
-   probability: 0.2
+   probability: 0.5
    
 -  source: Fila3
    destination: Fila1
-   probability: 0.7
+   probability: 0.5
+-  source: Fila3
+   destination: Fila2
+   probability: 0.2
 -  source: Fila3
    destination: EXTERIOR
    probability: 0.3
